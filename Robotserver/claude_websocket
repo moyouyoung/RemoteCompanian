@@ -1,0 +1,245 @@
+import asyncio
+import json
+import logging
+import time
+from websockets.server import serve
+import RPi.GPIO as GPIO
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger('RobotServer')
+
+# GPIO Setup for two motors
+# Motor A - Left Motor
+MOTOR_A_ENABLE = 17  # GPIO pin for enable
+MOTOR_A_PIN1 = 27    # GPIO pin for direction control 1
+MOTOR_A_PIN2 = 22    # GPIO pin for direction control 2
+
+# Motor B - Right Motor
+MOTOR_B_ENABLE = 18  # GPIO pin for enable
+MOTOR_B_PIN1 = 23    # GPIO pin for direction control 1
+MOTOR_B_PIN2 = 24    # GPIO pin for direction control 2
+
+# PWM parameters
+PWM_FREQUENCY = 100  # Hz
+SPEED_DEFAULT = 50   # Default speed (0-100)
+
+# Set up GPIO
+def setup_gpio():
+    GPIO.setmode(GPIO.BCM)
+    
+    # Set all pins as outputs
+    pins = [MOTOR_A_ENABLE, MOTOR_A_PIN1, MOTOR_A_PIN2, 
+            MOTOR_B_ENABLE, MOTOR_B_PIN1, MOTOR_B_PIN2]
+    
+    for pin in pins:
+        GPIO.setup(pin, GPIO.OUT)
+        GPIO.output(pin, GPIO.LOW)
+    
+    # Set up PWM for motor speed control
+    motor_a_pwm = GPIO.PWM(MOTOR_A_ENABLE, PWM_FREQUENCY)
+    motor_b_pwm = GPIO.PWM(MOTOR_B_ENABLE, PWM_FREQUENCY)
+    
+    # Start PWM with 0% duty cycle (motors stopped)
+    motor_a_pwm.start(0)
+    motor_b_pwm.start(0)
+    
+    return motor_a_pwm, motor_b_pwm
+
+# Motor control functions
+def motor_forward(motor_pwm, pin1, pin2, speed=SPEED_DEFAULT):
+    GPIO.output(pin1, GPIO.HIGH)
+    GPIO.output(pin2, GPIO.LOW)
+    motor_pwm.ChangeDutyCycle(speed)
+
+def motor_backward(motor_pwm, pin1, pin2, speed=SPEED_DEFAULT):
+    GPIO.output(pin1, GPIO.LOW)
+    GPIO.output(pin2, GPIO.HIGH)
+    motor_pwm.ChangeDutyCycle(speed)
+
+def motor_stop(motor_pwm, pin1, pin2):
+    GPIO.output(pin1, GPIO.LOW)
+    GPIO.output(pin2, GPIO.LOW)
+    motor_pwm.ChangeDutyCycle(0)
+
+# Robot movement functions
+def move_forward(motor_a_pwm, motor_b_pwm, speed=SPEED_DEFAULT):
+    motor_forward(motor_a_pwm, MOTOR_A_PIN1, MOTOR_A_PIN2, speed)
+    motor_forward(motor_b_pwm, MOTOR_B_PIN1, MOTOR_B_PIN2, speed)
+    return {"action": "forward", "speed": speed}
+
+def move_backward(motor_a_pwm, motor_b_pwm, speed=SPEED_DEFAULT):
+    motor_backward(motor_a_pwm, MOTOR_A_PIN1, MOTOR_A_PIN2, speed)
+    motor_backward(motor_b_pwm, MOTOR_B_PIN1, MOTOR_B_PIN2, speed)
+    return {"action": "backward", "speed": speed}
+
+def turn_left(motor_a_pwm, motor_b_pwm, speed=SPEED_DEFAULT):
+    motor_stop(motor_a_pwm, MOTOR_A_PIN1, MOTOR_A_PIN2)
+    motor_forward(motor_b_pwm, MOTOR_B_PIN1, MOTOR_B_PIN2, speed)
+    return {"action": "left", "speed": speed}
+
+def turn_right(motor_a_pwm, motor_b_pwm, speed=SPEED_DEFAULT):
+    motor_forward(motor_a_pwm, MOTOR_A_PIN1, MOTOR_A_PIN2, speed)
+    motor_stop(motor_b_pwm, MOTOR_B_PIN1, MOTOR_B_PIN2)
+    return {"action": "right", "speed": speed}
+
+def stop(motor_a_pwm, motor_b_pwm):
+    motor_stop(motor_a_pwm, MOTOR_A_PIN1, MOTOR_A_PIN2)
+    motor_stop(motor_b_pwm, MOTOR_B_PIN1, MOTOR_B_PIN2)
+    return {"action": "stop", "speed": 0}
+
+# Get sensor data (can be expanded based on available sensors)
+def get_telemetry():
+    # This is a placeholder - add your actual sensor readings here
+    # For example, read from I2C sensors, ADCs, etc.
+    
+    return {
+        "timestamp": time.time(),
+        "battery": {
+            "voltage": 11.7,  # Example value
+            "percentage": 85  # Example value
+        },
+        "temperature": 42.5,  # Example value in Celsius
+        "motors": {
+            "left": {
+                "current": 0.5,  # Example value in amps
+                "temperature": 39.2  # Example value in Celsius
+            },
+            "right": {
+                "current": 0.48,  # Example value in amps
+                "temperature": 38.7  # Example value in Celsius
+            }
+        },
+        "system": {
+            "cpu_temp": 58.3,  # Example value in Celsius
+            "cpu_usage": 23.5,  # Example value in percentage
+            "memory_usage": 34.2  # Example value in percentage
+        }
+    }
+
+# WebSocket server handler
+async def robot_handler(websocket):
+    # Set up GPIO and motors
+    motor_a_pwm, motor_b_pwm = setup_gpio()
+    
+    client_ip = websocket.remote_address[0]
+    logger.info(f"New connection from {client_ip}")
+    
+    try:
+        # Send initial status message
+        await websocket.send(json.dumps({
+            "status": "connected",
+            "telemetry": get_telemetry()
+        }))
+        
+        # Start telemetry sender task
+        telemetry_task = asyncio.create_task(
+            send_telemetry(websocket, 1.0)  # Send telemetry every 1 second
+        )
+        
+        # Wait for commands
+        async for message in websocket:
+            try:
+                data = json.loads(message)
+                command = data.get("command", "").lower()
+                speed = data.get("speed", SPEED_DEFAULT)
+                
+                # Process command
+                action_result = None
+                
+                if command == "forward":
+                    action_result = move_forward(motor_a_pwm, motor_b_pwm, speed)
+                    logger.info("Moving forward")
+                    
+                elif command == "backward":
+                    action_result = move_backward(motor_a_pwm, motor_b_pwm, speed)
+                    logger.info("Moving backward")
+                    
+                elif command == "left":
+                    action_result = turn_left(motor_a_pwm, motor_b_pwm, speed)
+                    logger.info("Turning left")
+                    
+                elif command == "right":
+                    action_result = turn_right(motor_a_pwm, motor_b_pwm, speed)
+                    logger.info("Turning right")
+                    
+                elif command == "stop":
+                    action_result = stop(motor_a_pwm, motor_b_pwm)
+                    logger.info("Stopping")
+                    
+                elif command == "status":
+                    action_result = {"action": "status", "status": "ok"}
+                    logger.info("Status request")
+                    
+                # Send action acknowledgment
+                if action_result:
+                    await websocket.send(json.dumps({
+                        "status": "ok",
+                        "command_processed": command,
+                        "action": action_result
+                    }))
+                    
+            except json.JSONDecodeError:
+                logger.error(f"Invalid JSON received: {message}")
+                await websocket.send(json.dumps({
+                    "status": "error",
+                    "message": "Invalid JSON format"
+                }))
+                
+    except Exception as e:
+        logger.error(f"Error handling client {client_ip}: {e}")
+        
+    finally:
+        # Clean up
+        logger.info(f"Connection closed with {client_ip}")
+        try:
+            telemetry_task.cancel()
+            await telemetry_task
+        except:
+            pass
+            
+        # Stop motors
+        stop(motor_a_pwm, motor_b_pwm)
+        
+        # Cleanup GPIO on exit
+        GPIO.cleanup()
+
+# Periodic telemetry sender
+async def send_telemetry(websocket, interval):
+    try:
+        while True:
+            await asyncio.sleep(interval)
+            telemetry = get_telemetry()
+            await websocket.send(json.dumps({
+                "telemetry": telemetry
+            }))
+    except asyncio.CancelledError:
+        # Task was cancelled, exit gracefully
+        pass
+    except Exception as e:
+        logger.error(f"Error in telemetry: {e}")
+
+# Main server function
+async def main():
+    # Start WebSocket server
+    host = "0.0.0.0"  # Listen on all network interfaces
+    port = 8080
+    
+    logger.info(f"Starting robot control server on {host}:{port}")
+    
+    async with serve(robot_handler, host, port):
+        await asyncio.Future()  # Run forever
+
+# Run the server
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("Server stopped by user")
+    finally:
+        # Ensure GPIO is cleaned up
+        GPIO.cleanup()
+        logger.info("GPIO cleaned up")

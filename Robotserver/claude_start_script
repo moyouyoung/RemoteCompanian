@@ -1,0 +1,114 @@
+#!/usr/bin/env python3
+import subprocess
+import time
+import os
+import signal
+import sys
+import logging
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler("/home/pi/robot/robot.log")
+    ]
+)
+logger = logging.getLogger('RobotStartup')
+
+# Paths
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+SERVER_SCRIPT = os.path.join(SCRIPT_DIR, "robot_server.py")
+
+# Process holders
+control_process = None
+video_process = None
+
+def start_control_server():
+    """Start the WebSocket control server"""
+    global control_process
+    
+    logger.info("Starting robot control server...")
+    control_process = subprocess.Popen(
+        ["python3", SERVER_SCRIPT],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE
+    )
+    logger.info(f"Control server started with PID: {control_process.pid}")
+
+def start_video_stream():
+    """Start the video streaming service using MJPG-Streamer"""
+    global video_process
+    
+    logger.info("Starting video stream...")
+    # Using MJPG-Streamer for video streaming
+    # Adjust parameters as needed for your camera
+    video_process = subprocess.Popen(
+        [
+            "mjpg_streamer",
+            "-i", "input_raspicam.so -fps 15 -q 50 -x 640 -y 480",
+            "-o", "output_http.so -p 8081 -w /usr/local/share/mjpg-streamer/www"
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        shell=True
+    )
+    logger.info(f"Video stream started with PID: {video_process.pid}")
+
+def cleanup(signum=None, frame=None):
+    """Clean up processes on exit"""
+    logger.info("Shutting down robot services...")
+    
+    # Terminate control server
+    if control_process:
+        logger.info("Terminating control server...")
+        control_process.terminate()
+        try:
+            control_process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            control_process.kill()
+    
+    # Terminate video stream
+    if video_process:
+        logger.info("Terminating video stream...")
+        video_process.terminate()
+        try:
+            video_process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            video_process.kill()
+    
+    logger.info("All processes terminated")
+    sys.exit(0)
+
+def main():
+    # Register signal handlers for graceful shutdown
+    signal.signal(signal.SIGTERM, cleanup)
+    signal.signal(signal.SIGINT, cleanup)
+    
+    try:
+        # Start services
+        start_control_server()
+        start_video_stream()
+        
+        logger.info("All robot services started")
+        
+        # Monitor processes and restart if needed
+        while True:
+            if control_process.poll() is not None:
+                logger.warning("Control server stopped unexpectedly, restarting...")
+                start_control_server()
+            
+            if video_process.poll() is not None:
+                logger.warning("Video stream stopped unexpectedly, restarting...")
+                start_video_stream()
+            
+            time.sleep(5)
+    
+    except KeyboardInterrupt:
+        logger.info("Interrupted by user")
+    finally:
+        cleanup()
+
+if __name__ == "__main__":
+    main()

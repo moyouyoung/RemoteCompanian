@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Robot Control Panel</title>
+    <style>
+        :root {
+            --primary: #3498db;
+            --primary-dark: #2980b9;
+            --secondary: #2ecc71;
+            --secondary-dark: #27ae60;
+            --danger: #e74c3c;
+            --dark: #2c3e50;
+            --light: #ecf0f1;
+        }
+        
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        body {
+            background-color: #f5f5f5;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .login-container {
+            max-width: 400px;
+            margin: 100px auto;
+            padding: 30px;
+            background-color: white;
+            border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+        }
+        
+        h1, h2 {
+            color: var(--dark);
+            margin-bottom: 20px;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: var(--dark);
+        }
+        
+        input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 16px;
+        }
+        
+        .btn {
+            padding: 12px 20px;
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            transition: background-color 0.3s;
+        }
+        
+        .btn:hover {
+            background-color: var(--primary-dark);
+        }
+        
+        .control-panel {
+            display: none;
+            background-color: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+        }
+        
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        
+        .connection-status {
+            display: flex;
+            align-items: center;
+        }
+        
+        .status-indicator {
+            width: 15px;
+            height: 15px;
+            border-radius: 50%;
+            margin-right: 10px;
+        }
+        
+        .status-disconnected {
+            background-color: var(--danger);
+        }
+        
+        .status-connected {
+            background-color: var(--secondary);
+        }
+        
+        .logout-btn {
+            background-color: var(--danger);
+        }
+        
+        .logout-btn:hover {
+            background-color: #c0392b;
+        }
+        
+        .video-container {
+            width: 100%;
+            background-color: #333;
+            height: 400px;
+            margin-bottom: 30px;
+            border-radius: 5px;
+            overflow: hidden;
+            position: relative;
+        }
+        
+        .video-placeholder {
+            color: white;
+            text-align: center;
+            line-height: 400px;
+            font-size: 16px;
+        }
+        
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: none;
+        }
+        
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            grid-gap: 10px;
+            max-width: 300px;
+            margin: 0 auto;
+        }
+        
+        .control-btn {
+            padding: 15px;
+            text-align: center;
+            background-color: var(--dark);
+            color: white;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s, transform 0.1s;
+            user-select: none;
+        }
+        
+        .control-btn:hover {
+            background-color: #34495e;
+        }
+        
+        .control-btn:active {
+            transform: scale(0.95);
+        }
+        
+        .empty {
+            visibility: hidden;
+        }
+        
+        .telemetry {
+            margin-top: 30px;
+            padding: 20px;
+            background-color: var(--light);
+            border-radius: 5px;
+        }
+        
+        .telemetry h3 {
+            margin-bottom: 10px;
+        }
+        
+        .telemetry-data {
+            font-family: monospace;
+            white-space: pre;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Login Form -->
+        <div id="login-container" class="login-container">
+            <h1>Robot Control Login</h1>
+            <form id="login-form">
+                <div class="form-group">
+                    <label for="username">Username</label>
+                    <input type="text" id="username" required>
+                </div>
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" required>
+                </div>
+                <button type="submit" class="btn">Login</button>
+            </form>
+        </div>
+        
+        <!-- Control Panel -->
+        <div id="control-panel" class="control-panel">
+            <div class="panel-header">
+                <h1>Robot Control Panel</h1>
+                <div class="connection-status">
+                    <div id="status-indicator" class="status-indicator status-disconnected"></div>
+                    <span id="connection-status">Disconnected</span>
+                </div>
+                <button id="logout-btn" class="btn logout-btn">Logout</button>
+            </div>
+            
+            <div class="video-container">
+                <div id="video-placeholder" class="video-placeholder">Connecting to video feed...</div>
+                <video id="robot-video" autoplay></video>
+            </div>
+            
+            <div class="controls">
+                <div class="control-btn empty"></div>
+                <div id="forward-btn" class="control-btn">Forward</div>
+                <div class="control-btn empty"></div>
+                <div id="left-btn" class="control-btn">Left</div>
+                <div id="stop-btn" class="control-btn">Stop</div>
+                <div id="right-btn" class="control-btn">Right</div>
+                <div class="control-btn empty"></div>
+                <div id="backward-btn" class="control-btn">Backward</div>
+                <div class="control-btn empty"></div>
+            </div>
+            
+            <div class="telemetry">
+                <h3>Robot Telemetry</h3>
+                <pre id="telemetry-data" class="telemetry-data">Waiting for data...</pre>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Sample user credentials (replace with server authentication)
+        const validCredentials = {
+            username: 'admin',
+            password: 'robotics123'
+        };
+        
+        // WebSocket connection (replace with your robot's WebSocket address)
+        let socket;
+        let videoStream;
+        
+        // DOM Elements
+        const loginContainer = document.getElementById('login-container');
+        const loginForm = document.getElementById('login-form');
+        const controlPanel = document.getElementById('control-panel');
+        const statusIndicator = document.getElementById('status-indicator');
+        const connectionStatus = document.getElementById('connection-status');
+        const logoutBtn = document.getElementById('logout-btn');
+        const videoPlaceholder = document.getElementById('video-placeholder');
+        const robotVideo = document.getElementById('robot-video');
+        const telemetryData = document.getElementById('telemetry-data');
+        
+        // Control buttons
+        const forwardBtn = document.getElementById('forward-btn');
+        const backwardBtn = document.getElementById('backward-btn');
+        const leftBtn = document.getElementById('left-btn');
+        const rightBtn = document.getElementById('right-btn');
+        const stopBtn = document.getElementById('stop-btn');
+        
+        // Login form submission
+        loginForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            
+            // Validate credentials (in production, use server authentication)
+            if (username === validCredentials.username && password === validCredentials.password) {
+                loginContainer.style.display = 'none';
+                controlPanel.style.display = 'block';
+                initRobotConnection();
+            } else {
+                alert('Invalid credentials. Please try again.');
+            }
+        });
+        
+        // Logout button
+        logoutBtn.addEventListener('click', function() {
+            if (socket) {
+                socket.close();
+            }
+            if (videoStream) {
+                stopVideoStream();
+            }
+            
+            loginContainer.style.display = 'block';
+            controlPanel.style.display = 'none';
+            
+            // Clear form
+            document.getElementById('username').value = '';
+            document.getElementById('password').value = '';
+        });
+        
+        // Initialize robot connection
+        function initRobotConnection() {
+            // Connect to robot WebSocket (replace with your robot's address)
+            try {
+                socket = new WebSocket('ws://your-robot-ip:8080');
+                
+                socket.onopen = function() {
+                    updateConnectionStatus(true);
+                    // Request initial status from robot
+                    sendCommand('status');
+                };
+                
+                socket.onclose = function() {
+                    updateConnectionStatus(false);
+                    // Try to reconnect after 5 seconds
+                    setTimeout(initRobotConnection, 5000);
+                };
+                
+                socket.onerror = function() {
+                    updateConnectionStatus(false);
+                };
+                
+                socket.onmessage = function(event) {
+                    handleRobotMessage(event.data);
+                };
+                
+                // Initialize video stream
+                initVideoStream();
+            } catch (error) {
+                console.error('Connection error:', error);
+                updateConnectionStatus(false);
+            }
+        }
+        
+        // Update connection status UI
+        function updateConnectionStatus(connected) {
+            if (connected) {
+                statusIndicator.className = 'status-indicator status-connected';
+                connectionStatus.textContent = 'Connected';
+            } else {
+                statusIndicator.className = 'status-indicator status-disconnected';
+                connectionStatus.textContent = 'Disconnected';
+                telemetryData.textContent = 'Connection lost...';
+            }
+        }
+        
+        // Handle messages from robot
+        function handleRobotMessage(message) {
+            try {
+                const data = JSON.parse(message);
+                
+                // Update telemetry data
+                if (data.telemetry) {
+                    telemetryData.textContent = JSON.stringify(data.telemetry, null, 2);
+                }
+                
+                // Other message handling as needed
+            } catch (error) {
+                console.error('Error parsing message:', error);
+            }
+        }
+        
+        // Send command to robot
+        function sendCommand(command) {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({ command: command }));
+            } else {
+                console.warn('Cannot send command: Not connected');
+            }
+        }
+        
+        // Initialize video stream (using WebRTC or other method)
+        function initVideoStream() {
+            // Simulate video connection with placeholder
+            // In a real implementation, connect to robot's video stream
+            
+            // Example: For demonstration, we'll use a timeout to simulate connection
+            setTimeout(() => {
+                // In reality, connect to the robot's video stream here
+                // For example, using WebRTC or other streaming method
+                
+                // This is just a placeholder - replace with actual video streaming code
+                videoPlaceholder.style.display = 'none';
+                robotVideo.style.display = 'block';
+                
+                // Example of what real video initialization might look like:
+                /*
+                const videoConfig = {
+                    iceServers: [
+                        { urls: 'stun:stun.l.google.com:19302' }
+                    ]
+                };
+                
+                const peerConnection = new RTCPeerConnection(videoConfig);
+                // ... WebRTC setup code ...
+                */
+            }, 2000);
+        }
+        
+        // Stop video stream
+        function stopVideoStream() {
+            robotVideo.style.display = 'none';
+            videoPlaceholder.style.display = 'block';
+            
+            // Clean up video connection resources
+            // For example, close WebRTC connections
+        }
+        
+        // Control button event listeners
+        forwardBtn.addEventListener('mousedown', () => sendCommand('forward'));
+        forwardBtn.addEventListener('mouseup', () => sendCommand('stop'));
+        forwardBtn.addEventListener('mouseleave', () => sendCommand('stop'));
+        
+        backwardBtn.addEventListener('mousedown', () => sendCommand('backward'));
+        backwardBtn.addEventListener('mouseup', () => sendCommand('stop'));
+        backwardBtn.addEventListener('mouseleave', () => sendCommand('stop'));
+        
+        leftBtn.addEventListener('mousedown', () => sendCommand('left'));
+        leftBtn.addEventListener('mouseup', () => sendCommand('stop'));
+        leftBtn.addEventListener('mouseleave', () => sendCommand('stop'));
+        
+        rightBtn.addEventListener('mousedown', () => sendCommand('right'));
+        rightBtn.addEventListener('mouseup', () => sendCommand('stop'));
+        rightBtn.addEventListener('mouseleave', () => sendCommand('stop'));
+        
+        stopBtn.addEventListener('click', () => sendCommand('stop'));
+        
+        // Add keyboard controls
+        document.addEventListener('keydown', function(e) {
+            if (!controlPanel.style.display || controlPanel.style.display === 'none') {
+                return; // Only process keys when control panel is visible
+            }
+            
+            switch(e.key) {
+                case 'ArrowUp':
+                    sendCommand('forward');
+                    forwardBtn.classList.add('active');
+                    break;
+                case 'ArrowDown':
+                    sendCommand('backward');
+                    backwardBtn.classList.add('active');
+                    break;
+                case 'ArrowLeft':
+                    sendCommand('left');
+                    leftBtn.classList.add('active');
+                    break;
+                case 'ArrowRight':
+                    sendCommand('right');
+                    rightBtn.classList.add('active');
+                    break;
+                case ' ':
+                    sendCommand('stop');
+                    stopBtn.classList.add('active');
+                    break;
+            }
+        });
+        
+        document.addEventListener('keyup', function(e) {
+            switch(e.key) {
+                case 'ArrowUp':
+                case 'ArrowDown':
+                case 'ArrowLeft':
+                case 'ArrowRight':
+                    sendCommand('stop');
+                    forwardBtn.classList.remove('active');
+                    backwardBtn.classList.remove('active');
+                    leftBtn.classList.remove('active');
+                    rightBtn.classList.remove('active');
+                    break;
+                case ' ':
+                    stopBtn.classList.remove('active');
+                    break;
+            }
+        });
+    </script>
+</body>
+</html>
