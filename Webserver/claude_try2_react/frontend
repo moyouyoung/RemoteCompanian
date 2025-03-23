@@ -1,0 +1,264 @@
+// File: RobotDashboard.js - Main React component example
+import React, { useState, useEffect } from 'react';
+import axios from 'axios';
+import io from 'socket.io-client';
+
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+
+function RobotDashboard() {
+  const [robots, setRobots] = useState([]);
+  const [user, setUser] = useState(null);
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [socket, setSocket] = useState(null);
+
+  // Set up socket connection
+  useEffect(() => {
+    if (user) {
+      const newSocket = io(process.env.REACT_APP_API_URL || 'http://localhost:5000');
+      
+      newSocket.on('robot-status-change', ({ robotId, status, lastStatusChange }) => {
+        setRobots(prevRobots => 
+          prevRobots.map(robot => 
+            robot._id === robotId ? { ...robot, status, lastStatusChange } : robot
+          )
+        );
+      });
+      
+      newSocket.on('robot-update', ({ type, robot }) => {
+        if (type === 'added') {
+          setRobots(prevRobots => [...prevRobots, robot]);
+        }
+      });
+      
+      setSocket(newSocket);
+      
+      // Clean up socket connection
+      return () => {
+        newSocket.disconnect();
+      };
+    }
+  }, [user]);
+
+  useEffect(() => {
+    // Check for stored token on component mount
+    const token = localStorage.getItem('token');
+    const storedUser = localStorage.getItem('user');
+    
+    if (token && storedUser) {
+      setUser(JSON.parse(storedUser));
+      fetchRobots(token);
+    }
+  }, []);
+
+  const fetchRobots = async (token) => {
+    try {
+      setLoading(true);
+      const response = await axios.get(`${API_URL}/robots`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setRobots(response.data);
+      setLoading(false);
+    } catch (err) {
+      setError('Failed to fetch robots data');
+      setLoading(false);
+    }
+  };
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    try {
+      setLoading(true);
+      const res = await axios.post(`${API_URL}/login`, { username, password });
+      
+      // Store token and user info
+      localStorage.setItem('token', res.data.token);
+      localStorage.setItem('user', JSON.stringify({
+        username: res.data.username,
+        userId: res.data.userId
+      }));
+      
+      setUser({
+        username: res.data.username,
+        userId: res.data.userId
+      });
+      
+      // Reset form
+      setUsername('');
+      setPassword('');
+      setError('');
+      
+      // Fetch robots after successful login
+      fetchRobots(res.data.token);
+    } catch (err) {
+      setError(err.response?.data?.message || 'Login failed');
+      setLoading(false);
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    setUser(null);
+    setRobots([]);
+    if (socket) {
+      socket.disconnect();
+      setSocket(null);
+    }
+  };
+
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'online': return 'bg-green-500';
+      case 'offline': return 'bg-red-500';
+      case 'maintenance': return 'bg-yellow-500';
+      default: return 'bg-gray-500';
+    }
+  };
+
+  const formatDate = (dateString) => {
+    return new Date(dateString).toLocaleString();
+  };
+
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
+        <div className="bg-white p-8 rounded-lg shadow-md w-full max-w-md">
+          <h1 className="text-2xl font-bold mb-6 text-center">Robot Dashboard Login</h1>
+          
+          {error && (
+            <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+              {error}
+            </div>
+          )}
+          
+          <form onSubmit={handleLogin}>
+            <div className="mb-4">
+              <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="username">
+                Username
+              </label>
+              <input
+                id="username"
+                type="text"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                required
+              />
+            </div>
+            
+            <div className="mb-6">
+              <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="password">
+                Password
+              </label>
+              <input
+                id="password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                required
+              />
+            </div>
+            
+            <div className="flex items-center justify-between">
+              <button
+                type="submit"
+                className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline w-full"
+                disabled={loading}
+              >
+                {loading ? 'Logging in...' : 'Sign In'}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-100">
+      <header className="bg-white shadow">
+        <div className="max-w-7xl mx-auto py-4 px-4 sm:px-6 lg:px-8 flex justify-between items-center">
+          <h1 className="text-2xl font-bold text-gray-900">Robot Dashboard</h1>
+          <div className="flex items-center">
+            <span className="mr-4">Welcome, {user.username}</span>
+            <button
+              onClick={handleLogout}
+              className="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded"
+            >
+              Logout
+            </button>
+          </div>
+        </div>
+      </header>
+      
+      <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+        <div className="px-4 py-6 sm:px-0">
+          <h2 className="text-xl font-semibold mb-4">Robot Status List</h2>
+          
+          {loading ? (
+            <div className="text-center py-4">Loading robots data...</div>
+          ) : error ? (
+            <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
+              {error}
+            </div>
+          ) : robots.length === 0 ? (
+            <div className="text-center py-4 text-gray-500">No robots available</div>
+          ) : (
+            <div className="bg-white shadow overflow-hidden sm:rounded-lg">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Robot Name
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      ID
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Status
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Last Status Change
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Description
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {robots.map((robot) => (
+                    <tr key={robot._id}>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                        {robot.name}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {robot.identifier}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusColor(robot.status)} text-white`}>
+                          {robot.status}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {formatDate(robot.lastStatusChange)}
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-500">
+                        {robot.description || 'No description available'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </main>
+    </div>
+  );
+}
+
+export default RobotDashboard;

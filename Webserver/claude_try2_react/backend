@@ -1,0 +1,221 @@
+// File: server.js - Main application server
+const express = require('express');
+const mongoose = require('mongoose');
+const cors = require('cors');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const http = require('http');
+const socketIo = require('socket.io');
+require('dotenv').config();
+
+const app = express();
+const server = http.createServer(app);
+const io = socketIo(server, {
+  cors: {
+    origin: process.env.FRONTEND_URL || "http://localhost:3000",
+    methods: ["GET", "POST"],
+    credentials: true
+  }
+});
+
+// Middleware
+app.use(cors());
+app.use(express.json());
+
+// MongoDB Connection
+mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/robot-dashboard', {
+  useNewUrlParser: true,
+  useUnifiedTopology: true
+})
+.then(() => console.log('MongoDB connected'))
+.catch(err => console.error('MongoDB connection error:', err));
+
+// User Schema and Model
+const UserSchema = new mongoose.Schema({
+  username: { type: String, required: true, unique: true },
+  password: { type: String, required: true },
+  email: { type: String, required: true, unique: true },
+  createdAt: { type: Date, default: Date.now }
+});
+
+UserSchema.pre('save', async function(next) {
+  if (this.isModified('password')) {
+    this.password = await bcrypt.hash(this.password, 10);
+  }
+  next();
+});
+
+const User = mongoose.model('User', UserSchema);
+
+// Robot Schema and Model
+const RobotSchema = new mongoose.Schema({
+  name: { type: String, required: true },
+  identifier: { type: String, required: true, unique: true },
+  status: { 
+    type: String, 
+    enum: ['online', 'offline', 'maintenance'],
+    default: 'offline'
+  },
+  lastStatusChange: { type: Date, default: Date.now },
+  description: { type: String },
+  metadata: { type: Object }
+});
+
+const Robot = mongoose.model('Robot', RobotSchema);
+
+// Authentication Routes
+app.post('/api/register', async (req, res) => {
+  try {
+    const { username, password, email } = req.body;
+    
+    // Check if user exists
+    const existingUser = await User.findOne({ $or: [{ username }, { email }] });
+    if (existingUser) {
+      return res.status(400).json({ message: 'Username or email already exists' });
+    }
+    
+    // Create new user
+    const user = new User({ username, password, email });
+    await user.save();
+    
+    res.status(201).json({ message: 'User registered successfully' });
+  } catch (error) {
+    console.error('Registration error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+app.post('/api/login', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    
+    // Find user
+    const user = await User.findOne({ username });
+    if (!user) {
+      return res.status(401).json({ message: 'Invalid credentials' });
+    }
+    
+    // Check password
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(401).json({ message: 'Invalid credentials' });
+    }
+    
+    // Generate JWT token
+    const token = jwt.sign(
+      { userId: user._id, username: user.username },
+      process.env.JWT_SECRET || 'your_jwt_secret',
+      { expiresIn: '24h' }
+    );
+    
+    res.json({ token, userId: user._id, username: user.username });
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Authentication middleware
+const auth = (req, res, next) => {
+  try {
+    const token = req.header('Authorization').replace('Bearer ', '');
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your_jwt_secret');
+    req.user = decoded;
+    next();
+  } catch (error) {
+    res.status(401).json({ message: 'Authentication required' });
+  }
+};
+
+// Robot Routes
+app.get('/api/robots', auth, async (req, res) => {
+  try {
+    const robots = await Robot.find({});
+    res.json(robots);
+  } catch (error) {
+    console.error('Error fetching robots:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+app.post('/api/robots', auth, async (req, res) => {
+  try {
+    const { name, identifier, description, metadata } = req.body;
+    
+    const newRobot = new Robot({
+      name,
+      identifier,
+      description,
+      metadata
+    });
+    
+    await newRobot.save();
+    res.status(201).json(newRobot);
+    
+    // Notify all clients about new robot
+    io.emit('robot-update', { type: 'added', robot: newRobot });
+  } catch (error) {
+    console.error('Error creating robot:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+app.put('/api/robots/:id/status', auth, async (req, res) => {
+  try {
+    const { status } = req.body;
+    const robotId = req.params.id;
+    
+    const robot = await Robot.findById(robotId);
+    if (!robot) {
+      return res.status(404).json({ message: 'Robot not found' });
+    }
+    
+    robot.status = status;
+    robot.lastStatusChange = Date.now();
+    await robot.save();
+    
+    res.json(robot);
+    
+    // Notify all clients about status change
+    io.emit('robot-status-change', { robotId, status, lastStatusChange: robot.lastStatusChange });
+  } catch (error) {
+    console.error('Error updating robot status:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// WebSocket handling for real-time updates
+io.on('connection', (socket) => {
+  console.log('New client connected');
+  
+  // Simulate robot status change (for testing)
+  socket.on('update-robot-status', async ({ robotId, status }) => {
+    try {
+      const robot = await Robot.findByIdAndUpdate(
+        robotId,
+        { status, lastStatusChange: Date.now() },
+        { new: true }
+      );
+      
+      if (robot) {
+        io.emit('robot-status-change', { 
+          robotId: robot._id, 
+          status: robot.status,
+          lastStatusChange: robot.lastStatusChange
+        });
+      }
+    } catch (error) {
+      console.error('Error in WebSocket robot update:', error);
+    }
+  });
+  
+  socket.on('disconnect', () => {
+    console.log('Client disconnected');
+  });
+});
+
+// Server initialization
+const PORT = process.env.PORT || 5000;
+server.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
