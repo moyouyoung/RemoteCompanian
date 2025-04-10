@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Remote Device Control Panel</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #eee;
+        }
+        .user-info {
+            display: flex;
+            align-items: center;
+        }
+        .logout-btn {
+            background-color: #f44336;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-left: 10px;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .device-selector {
+            margin-bottom: 20px;
+            width: 100%;
+            max-width: 800px;
+        }
+        select {
+            width: 100%;
+            padding: 12px;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+            font-size: 16px;
+        }
+        .video-container {
+            width: 100%;
+            max-width: 800px;
+            margin-bottom: 20px;
+            background: #f0f0f0;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        video {
+            width: 100%;
+            display: block;
+        }
+        .controls {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+        button {
+            padding: 12px 24px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        button:active {
+            background-color: #3e8e41;
+        }
+        .status {
+            margin-top: 20px;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+            width: 100%;
+            max-width: 800px;
+        }
+        .connection-info {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+        }
+        .connection-dot {
+            height: 12px;
+            width: 12px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 5px;
+        }
+        .connected {
+            background-color: #4CAF50;
+        }
+        .disconnected {
+            background-color: #f44336;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Remote Device Control Panel</h1>
+        <div class="user-info">
+            <span id="username"></span>
+            <button class="logout-btn" id="logout">Logout</button>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="device-selector">
+            <label for="device-select">Select Device:</label>
+            <select id="device-select">
+                <option value="">-- Select a device --</option>
+            </select>
+        </div>
+        
+        <div class="connection-info">
+            <div>
+                <span class="connection-dot" id="ws-status-dot"></span>
+                <span id="ws-status">WebSocket: Disconnected</span>
+            </div>
+            <div>
+                <span class="connection-dot" id="rtc-status-dot"></span>
+                <span id="rtc-status">WebRTC: Disconnected</span>
+            </div>
+        </div>
+        
+        <div class="video-container">
+            <video id="remoteVideo" autoplay playsinline></video>
+        </div>
+        
+        <div class="controls">
+            <button id="forward" disabled>Forward</button>
+            <button id="backward" disabled>Backward</button>
+            <button id="left" disabled>Left</button>
+            <button id="right" disabled>Right</button>
+            <button id="stop" disabled>Stop</button>
+            <button id="connect">Connect</button>
+        </div>
+        
+        <div class="status">
+            <h3>Status Log</h3>
+            <div id="log"></div>
+        </div>
+    </div>
+
+    <script>
+        // Global variables
+        let socket;
+        let peerConnection;
+        let connected = false;
+        let selectedDeviceId = '';
+        
+        // DOM Elements
+        const remoteVideo = document.getElementById('remoteVideo');
+        const deviceSelect = document.getElementById('device-select');
+        const connectButton = document.getElementById('connect');
+        const logElement = document.getElementById('log');
+        const wsStatusDot = document.getElementById('ws-status-dot');
+        const wsStatus = document.getElementById('ws-status');
+        const rtcStatusDot = document.getElementById('rtc-status-dot');
+        const rtcStatus = document.getElementById('rtc-status');
+        const usernameElement = document.getElementById('username');
+        const logoutButton = document.getElementById('logout');
+        
+        // Control buttons
+        const controlButtons = ['forward', 'backward', 'left', 'right', 'stop'];
+        const controlButtonElements = controlButtons.map(id => document.getElementById(id));
+        
+        // Log function
+        function log(message) {
+            const time = new Date().toLocaleTimeString();
+            logElement.innerHTML = `<div>[${time}] ${message}</div>` + logElement.innerHTML;
+            console.log(`[${time}] ${message}`);
+        }
+        
+        // Update connection status indicators
+        function updateConnectionStatus(type, isConnected) {
+            if (type === 'ws') {
+                wsStatusDot.className = isConnected ? 'connection-dot connected' : 'connection-dot disconnected';
+                wsStatus.textContent = `WebSocket: ${isConnected ? 'Connected' : 'Disconnected'}`;
+            } else if (type === 'rtc') {
+                rtcStatusDot.className = isConnected ? 'connection-dot connected' : 'connection-dot disconnected';
+                rtcStatus.textContent = `WebRTC: ${isConnected ? 'Connected' : 'Disconnected'}`;
+            }
+        }
+        
+        // Enable/disable control buttons
+        function setControlButtonsState(enabled) {
+            controlButtonElements.forEach(button => {
+                button.disabled = !enabled;
+            });
+        }
+        
+        // Initialize WebSocket connection
+        function connectWebSocket() {
+            if (!selectedDeviceId) {
+                log('Please select a device first');
+                return;
+            }
+            
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                log('WebSocket already connected');
+                return;
+            }
+            
+            log('Connecting to signaling server...');
+            
+            // Use relative WebSocket URL with /signaling path
+            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${wsProtocol}//${window.location.host}/signaling`;
+            
+            socket = new WebSocket(wsUrl);
+            
+            socket.onopen = () => {
+                log('Connected to signaling server');
+                updateConnectionStatus('ws', true);
+                
+                // Register with the server
+                socket.send(JSON.stringify({
+                    type: 'register',
+                    role: 'controller',
+                    deviceId: selectedDeviceId
+                }));
+            };
+            
+            socket.onclose = () => {
+                log('Disconnected from signaling server');
+                updateConnectionStatus('ws', false);
+                updateConnectionStatus('rtc', false);
+                connected = false;
+                setControlButtonsState(false);
+            };
+            
+            socket.onerror = (error) => {
+                log('WebSocket error: ' + error.message);
+                updateConnectionStatus('ws', false);
+            };
+            
+            socket.onmessage = handleSignalingMessage;
+        }
+        
+        // Handle incoming signaling messages
+        function handleSignalingMessage(event) {
+            const message = JSON.parse(event.data);
+            log('Received message: ' + message.type);
+            
+            switch (message.type) {
+                case 'device_ready':
+                    initializeWebRTC();
+                    break;
+                    
+                case 'ice_candidate':
+                    if (peerConnection && message.candidate) {
+                        peerConnection.addIceCandidate(new RTCIceCandidate(message.candidate))
+                            .catch(error => log('Error adding ICE candidate: ' + error));
+                    }
+                    break;
+                    
+                case 'offer':
+                    handleOffer(message.offer);
+                    break;
+                    
+                case 'answer':
+                    if (peerConnection) {
+                        peerConnection.setRemoteDescription(new RTCSessionDescription(message.answer))
+                            .catch(error => log('Error setting remote description: ' + error));
+                    }
+                    break;
+                    
+                case 'command_response':
+                    log('Command response: ' + JSON.stringify(message.result));
+                    break;
+                    
+                case 'error':
+                    log('Error from server: ' + message.message);
+                    break;
+            }
+        }
+        
+        // Initialize WebRTC
+        function initializeWebRTC() {
+            log('Initializing WebRTC connection...');
+            
+            // ICE servers configuration (STUN/TURN servers for NAT traversal)
+            const configuration = {
+                iceServers: [
+                    { urls: 'stun:stun.l.google.com:19302' },
+                    { urls: 'stun:stun1.l.google.com:19302' },
+                    // Add your TURN server here for reliable NAT traversal
+                    // {
+                    //     urls: 'turn:your-turn-server.com',
+                    //     username: 'username',
+                    //     credential: 'password'
+                    // }
+                ]
+            };
+            
+            // Create RTCPeerConnection
+            peerConnection = new RTCPeerConnection(configuration);
+            
+            // Handle ICE candidates
+            peerConnection.onicecandidate = event => {
+                if (event.candidate) {
+                    socket.send(JSON.stringify({
+                        type: 'ice_candidate',
+                        deviceId: selectedDeviceId,
+                        candidate: event.candidate
+                    }));
+                }
+            };
+            
+            // Handle connection state changes
+            peerConnection.onconnectionstatechange = () => {
+                log('WebRTC connection state: ' + peerConnection.connectionState);
+                
+                if (peerConnection.connectionState === 'connected') {
+                    log('WebRTC connected successfully');
+                    updateConnectionStatus('rtc', true);
+                    connected = true;
+                    setControlButtonsState(true);
+                } else if (peerConnection.connectionState === 'disconnected' || 
+                          peerConnection.connectionState === 'failed' ||
+                          peerConnection.connectionState === 'closed') {
+                    log('WebRTC connection lost');
+                    updateConnectionStatus('rtc', false);
+                    connected = false;
+                    setControlButtonsState(false);
+                }
+            };
+            
+            // Handle incoming tracks (video stream)
+            peerConnection.ontrack = event => {
+                log('Received remote track');
+                if (remoteVideo.srcObject !== event.streams[0]) {
+                    remoteVideo.srcObject = event.streams[0];
+                    log('Remote video stream connected');
+                }
+            };
+            
+            // Create offer (for controller-initiated connections)
+            peerConnection.createOffer()
+                .then(offer => peerConnection.setLocalDescription(offer))
+                .then(() => {
+                    socket.send(JSON.stringify({
+                        type: 'offer',
+                        deviceId: selectedDeviceId,
+                        offer: peerConnection.localDescription
+                    }));
+                    log('Sent offer to device');
+                })
+                .catch(error => log('Error creating offer: ' + error));
+        }
+        
+        // Handle incoming offer from the remote device
+        function handleOffer(offer) {
+            if (!peerConnection) {
+                initializeWebRTC();
+            }
+            
+            peerConnection.setRemoteDescription(new RTCSessionDescription(offer))
+                .then(() => peerConnection.createAnswer())
+                .then(answer => peerConnection.setLocalDescription(answer))
+                .then(() => {
+                    socket.send(JSON.stringify({
+                        type: 'answer',
+                        deviceId: selectedDeviceId,
+                        answer: peerConnection.localDescription
+                    }));
+                    log('Sent answer to device');
+                })
+                .catch(error => log('Error handling offer: ' + error));
+        }
+        
+        // Send command to the remote device
+        function sendCommand(command) {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({
+                    type: 'command',
+                    deviceId: selectedDeviceId,
+                    command: command
+                }));
+                log('Sent command: ' + command);
+            } else {
+                log('Cannot send command: WebSocket not connected');
+            }
+        }
+        
+        // Load available devices for the user
+        function loadDevices() {
+            fetch('/api/devices')
+                .then(response => {
+                    if (!response.ok) {
+                        if (response.status === 401) {
+                            // Unauthorized, redirect to login
+                            window.location.href = '/login';
+                            throw new Error('Authentication required');
+                        }
+                        throw new Error('Error fetching devices');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    // Clear existing options except the placeholder
+                    while (deviceSelect.options.length > 1) {
+                        deviceSelect.remove(1);
+                    }
+                    
+                    // Add devices to select dropdown
+                    data.devices.forEach(deviceId => {
+                        const option = document.createElement('option');
+                        option.value = deviceId;
+                        option.textContent = deviceId;
+                        deviceSelect.appendChild(option);
+                    });
+                    
+                    if (data.devices.length === 0) {
+                        log('No devices available for your account');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    log('Failed to load devices: ' + error.message);
+                });
+        }
+        
+        // Handle logout
+        function logout() {
+            fetch('/api/logout')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        window.location.href = '/login';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                });
+        }
+        
+        // Event listeners
+        connectButton.addEventListener('click', () => {
+            if (!connected) {
+                connectWebSocket();
+            } else {
+                log('Already connected');
+            }
+        });
+        
+        deviceSelect.addEventListener('change', () => {
+            selectedDeviceId = deviceSelect.value;
+            
+            // Reset connections if device changes
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.close();
+            }
+            if (peerConnection) {
+                peerConnection.close();
+                peerConnection = null;
+            }
+            
+            updateConnectionStatus('ws', false);
+            updateConnectionStatus('rtc', false);
+            connected = false;
+            setControlButtonsState(false);
+            
+            remoteVideo.srcObject = null;
+            
+            if (selectedDeviceId) {
+                log(`Selected device: ${selectedDeviceId}`);
+            }
+        });
+        
+        logoutButton.addEventListener('click', logout);
+        
+        // Attach event listeners to control buttons
+        controlButtons.forEach(buttonId => {
+            const button = document.getElementById(buttonId);
+            button.addEventListener('click', () => {
+                sendCommand(buttonId);
+            });
+        });
+        
+        // Initialize the application
+        window.addEventListener('load', () => {
+            // Get username for display
+            fetch('/api/devices')
+                .then(response => {
+                    if (!response.ok) {
+                        if (response.status === 401) {
+                            window.location.href = '/login';
+                            throw new Error('Authentication required');
+                        }
+                        throw new Error('Error fetching user info');
+                    }
+                    // The username is in the session, but we don't directly expose it
+                    // Just showing something generic here
+                    usernameElement.textContent = 'Logged In User';
+                    
+                    // Load available devices
+                    loadDevices();
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                });
+            
+            log('Application loaded. Select a device and click "Connect" to start.');
+            updateConnectionStatus('ws', false);
+            updateConnectionStatus('rtc', false);
+            setControlButtonsState(false);
+        });
+    </script>
