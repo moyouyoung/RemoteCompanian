@@ -32,7 +32,7 @@ remote-control-system/
 ```bash
 cd remote-control-system
 npm init -y
-npm install express ws http express-session body-parser
+npm install express@4.21.2 ws http express-session body-parser
 ```
 
 3. **Create the configuration files:**

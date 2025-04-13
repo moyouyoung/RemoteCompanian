@@ -64,6 +64,17 @@ function ensureAuthenticated(req, res, next) {
     res.redirect('/login');
 }
 
+// Add this route before your other routes
+app.get('/', (req, res) => {
+    if (req.session && req.session.authenticated) {
+        // User is authenticated, redirect to app
+        res.redirect('/app');
+    } else {
+        // User is not authenticated, redirect to login
+        res.redirect('/login');
+    }
+});
+
 // Serve login page
 app.get('/login', (req, res) => {
     if (req.session && req.session.authenticated) {
