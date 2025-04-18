@@ -1,0 +1,10 @@
+{
+    "admin": {
+      "password": "admin123",
+      "devices": ["unique-device-id"]
+    },
+    "user1": {
+      "password": "password123",
+      "devices": ["unique-device-id", "second-device-id"]
+    }
+  }
