@@ -1,0 +1,185 @@
+<!-- templates/index.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Robot Control</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            text-align: center;
+        }
+        
+        h1 {
+            color: #333;
+        }
+        
+        .video-container {
+            margin: 20px 0;
+            position: relative;
+        }
+        
+        .video-feed {
+            width: 100%;
+            max-width: 1280px;
+            border: 3px solid #333;
+            border-radius: 5px;
+        }
+        
+        .controls {
+            margin: 20px 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        
+        .control-row {
+            display: flex;
+            margin: 5px;
+        }
+        
+        .control-btn {
+            width: 80px;
+            height: 80px;
+            margin: 5px;
+            border: none;
+            border-radius: 8px;
+            background-color: #4285f4;
+            color: white;
+            font-size: 16px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .control-btn:hover {
+            background-color: #3367d6;
+        }
+        
+        .control-btn:active {
+            background-color: #2a56c6;
+        }
+        
+        .stop-btn {
+            background-color: #ea4335;
+        }
+        
+        .stop-btn:hover {
+            background-color: #d33828;
+        }
+        
+        .arrow {
+            border: solid white;
+            border-width: 0 5px 5px 0;
+            display: inline-block;
+            padding: 8px;
+        }
+        
+        .right {
+            transform: rotate(-45deg);
+        }
+        
+        .left {
+            transform: rotate(135deg);
+        }
+        
+        .up {
+            transform: rotate(-135deg);
+        }
+        
+        .down {
+            transform: rotate(45deg);
+        }
+        
+        .status {
+            margin-top: 20px;
+            padding: 10px;
+            background-color: #f1f1f1;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Robot Control Interface</h1>
+    
+    <div class="video-container">
+        <img src="{{ url_for('video_feed') }}" class="video-feed" alt="Robot Camera Feed">
+    </div>
+    
+    <div class="controls">
+        <div class="control-row">
+            <button class="control-btn" onclick="moveRobot('forward')"><i class="arrow up"></i></button>
+        </div>
+        <div class="control-row">
+            <button class="control-btn" onclick="moveRobot('left')"><i class="arrow left"></i></button>
+            <button class="control-btn stop-btn" onclick="moveRobot('stop')">STOP</button>
+            <button class="control-btn" onclick="moveRobot('right')"><i class="arrow right"></i></button>
+        </div>
+        <div class="control-row">
+            <button class="control-btn" onclick="moveRobot('backward')"><i class="arrow down"></i></button>
+        </div>
+    </div>
+    
+    <div class="status" id="status">
+        Status: Stopped
+    </div>
+    
+    <script>
+        function moveRobot(direction) {
+            fetch(`/move/${direction}`)
+                .then(response => response.json())
+                .then(data => {
+                    console.log('Success:', data);
+                    updateStatus(direction);
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                });
+        }
+        
+        function updateStatus(direction) {
+            const statusElement = document.getElementById('status');
+            let statusText = '';
+            
+            switch(direction) {
+                case 'forward':
+                    statusText = 'Moving Forward';
+                    break;
+                case 'backward':
+                    statusText = 'Moving Backward';
+                    break;
+                case 'left':
+                    statusText = 'Turning Left';
+                    break;
+                case 'right':
+                    statusText = 'Turning Right';
+                    break;
+                case 'stop':
+                    statusText = 'Stopped';
+                    break;
+                default:
+                    statusText = 'Unknown';
+            }
+            
+            statusElement.innerHTML = `Status: ${statusText}`;
+        }
+        
+        // Update status every 2 seconds
+        setInterval(() => {
+            fetch('/status')
+                .then(response => response.json())
+                .then(data => {
+                    console.log('Status:', data);
+                })
+                .catch(error => {
+                    console.error('Error getting status:', error);
+                });
+        }, 2000);
+    </script>
+</body>
+</html>
